@@ -1,0 +1,502 @@
+
+CREATE TABLE payors (
+  payor_id      INTEGER PRIMARY KEY,
+  payor_name    TEXT NOT NULL UNIQUE,
+  payor_type    TEXT NOT NULL CHECK (payor_type IN ('Commercial','Medicare','Medicaid','Workers Comp','Self-Pay')),
+  phone         TEXT,
+  contract_rate REAL NOT NULL,          -- share of billed amount the payor reimburses (0.80 = 80%)
+  is_active     INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE sites (
+  site_id          INTEGER PRIMARY KEY,
+  site_name        TEXT NOT NULL UNIQUE,
+  site_type        TEXT NOT NULL CHECK (site_type IN ('Hospital Campus','Medical Office Building','Standalone Center')),
+  address_line     TEXT NOT NULL,
+  city             TEXT NOT NULL,
+  state            TEXT NOT NULL,
+  zip_code         TEXT NOT NULL,
+  facility_npi     TEXT UNIQUE,          -- organizational (Type 2) NPI printed on facility claims; NULL until enrolled
+  tax_id           TEXT NOT NULL,        -- EIN of the billing entity; several sites can share one
+  default_pos_code TEXT NOT NULL,        -- CMS place-of-service code billed by default (22, 11, 20, 24...)
+  phone            TEXT,
+  is_active        INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE treatment_locations (
+  location_id   INTEGER PRIMARY KEY,
+  location_name TEXT NOT NULL,
+  location_type TEXT NOT NULL,         -- Clinic, Hospital, Urgent Care, Telehealth
+  city          TEXT NOT NULL,
+  state         TEXT NOT NULL,
+  opened_date   TEXT NOT NULL,
+  site_id       INTEGER NOT NULL REFERENCES sites(site_id)   -- the facility this unit operates in
+);
+CREATE TABLE practitioners (
+  practitioner_id INTEGER PRIMARY KEY,
+  first_name      TEXT NOT NULL,
+  last_name       TEXT NOT NULL,
+  specialty       TEXT NOT NULL,
+  npi             TEXT UNIQUE,
+  location_id     INTEGER REFERENCES treatment_locations(location_id),
+  supervisor_id   INTEGER REFERENCES practitioners(practitioner_id),
+  hire_date       TEXT NOT NULL,
+  hourly_rate     REAL
+);
+CREATE TABLE patients (
+  patient_id       INTEGER PRIMARY KEY,
+  first_name       TEXT NOT NULL,
+  last_name        TEXT NOT NULL,
+  date_of_birth    TEXT NOT NULL,
+  gender           TEXT,
+  city             TEXT,
+  email            TEXT,
+  allergies        TEXT,
+  primary_payor_id INTEGER REFERENCES payors(payor_id)
+);
+CREATE TABLE invoices (
+  invoice_id   INTEGER PRIMARY KEY,
+  patient_id   INTEGER NOT NULL REFERENCES patients(patient_id),
+  payor_id     INTEGER REFERENCES payors(payor_id),
+  location_id  INTEGER NOT NULL REFERENCES treatment_locations(location_id),
+  invoice_date TEXT NOT NULL,
+  due_date     TEXT NOT NULL,
+  status       TEXT NOT NULL CHECK (status IN ('Open','Paid','Partially Paid','Overdue','Void')),
+  total_amount REAL NOT NULL DEFAULT 0
+);
+CREATE TABLE charges (
+  charge_id       INTEGER PRIMARY KEY,
+  invoice_id      INTEGER NOT NULL REFERENCES invoices(invoice_id),
+  practitioner_id INTEGER NOT NULL REFERENCES practitioners(practitioner_id),
+  service_date    TEXT NOT NULL,
+  cpt_code        TEXT NOT NULL,
+  description     TEXT NOT NULL,
+  units           INTEGER NOT NULL DEFAULT 1,
+  unit_price      REAL NOT NULL,
+  amount          REAL NOT NULL
+);
+CREATE TABLE payments (
+  payment_id   INTEGER PRIMARY KEY,
+  invoice_id   INTEGER NOT NULL REFERENCES invoices(invoice_id),
+  payor_id     INTEGER REFERENCES payors(payor_id),   -- NULL = paid by the patient
+  payment_date TEXT NOT NULL,
+  amount       REAL NOT NULL,
+  method       TEXT NOT NULL
+);
+CREATE TABLE transactions (
+  transaction_id   INTEGER PRIMARY KEY,
+  invoice_id       INTEGER NOT NULL REFERENCES invoices(invoice_id),
+  transaction_date TEXT NOT NULL,
+  transaction_type TEXT NOT NULL CHECK (transaction_type IN ('CHARGE','PAYMENT','ADJUSTMENT','REFUND','WRITE_OFF')),
+  amount           REAL NOT NULL,       -- + increases balance owed, - decreases it
+  reference_id     INTEGER,             -- charge_id or payment_id this entry came from
+  posted_by        TEXT
+);
+
+INSERT INTO payors VALUES (1, 'BlueShield Health', 'Commercial', '800-555-0101', 0.8, 1);
+INSERT INTO payors VALUES (2, 'Aetna Care', 'Commercial', '800-555-0102', 0.75, 1);
+INSERT INTO payors VALUES (3, 'Medicare Part B', 'Medicare', '800-555-0103', 0.65, 1);
+INSERT INTO payors VALUES (4, 'State Medicaid', 'Medicaid', '800-555-0104', 0.55, 1);
+INSERT INTO payors VALUES (5, 'United Workers Comp', 'Workers Comp', NULL, 0.9, 1);
+INSERT INTO payors VALUES (6, 'Cigna Select', 'Commercial', '800-555-0106', 0.78, 0);
+INSERT INTO payors VALUES (7, 'Self-Pay', 'Self-Pay', NULL, 1, 1);
+INSERT INTO sites VALUES (1, 'St. Mary Medical Campus', 'Hospital Campus', '1200 Red River St', 'Austin', 'TX', '78701', '1902001001', '74-1234567', '22', '512-555-0100', 1);
+INSERT INTO sites VALUES (2, 'Downtown Medical Plaza', 'Medical Office Building', '500 Congress Ave', 'Austin', 'TX', '78701', '1902001002', '74-1234567', '11', '512-555-0200', 1);
+INSERT INTO sites VALUES (3, 'Northside Health Center', 'Standalone Center', '2100 N Mays St', 'Round Rock', 'TX', '78664', '1902001003', '74-7654321', '20', '512-555-0300', 1);
+INSERT INTO sites VALUES (4, 'Lakeview Medical Pavilion', 'Medical Office Building', '8300 Lake Park Blvd', 'Dallas', 'TX', '75214', '1902001004', '75-2223333', '11', '214-555-0400', 1);
+INSERT INTO sites VALUES (5, 'Eastside Community Campus', 'Medical Office Building', '4100 Lyons Ave', 'Houston', 'TX', '77020', '1902001005', '76-4445555', '11', NULL, 1);
+INSERT INTO sites VALUES (6, 'Westlake Surgery Center', 'Standalone Center', '3600 Bee Cave Rd', 'Austin', 'TX', '78746', NULL, '74-1234567', '24', NULL, 0);
+INSERT INTO treatment_locations VALUES (1, 'Downtown Medical Clinic', 'Clinic', 'Austin', 'TX', '2015-03-01', 2);
+INSERT INTO treatment_locations VALUES (2, 'St. Mary General Hospital', 'Hospital', 'Austin', 'TX', '2008-06-15', 1);
+INSERT INTO treatment_locations VALUES (3, 'Northside Urgent Care', 'Urgent Care', 'Round Rock', 'TX', '2019-09-10', 3);
+INSERT INTO treatment_locations VALUES (4, 'Lakeview Physical Therapy', 'Clinic', 'Dallas', 'TX', '2017-01-20', 4);
+INSERT INTO treatment_locations VALUES (5, 'CareConnect Telehealth', 'Telehealth', 'Dallas', 'TX', '2021-04-05', 4);
+INSERT INTO treatment_locations VALUES (6, 'Eastside Family Clinic', 'Clinic', 'Houston', 'TX', '2026-08-15', 5);
+INSERT INTO practitioners VALUES (1, 'Elena', 'Ramirez', 'Internal Medicine', '1003001001', 2, NULL, '2010-02-01', 145);
+INSERT INTO practitioners VALUES (2, 'James', 'Okafor', 'Family Medicine', '1003001002', 1, 1, '2016-05-12', 110);
+INSERT INTO practitioners VALUES (3, 'Priya', 'Nair', 'Cardiology', '1003001003', 2, 1, '2012-08-20', 190);
+INSERT INTO practitioners VALUES (4, 'Marcus', 'Chen', 'Emergency Medicine', '1003001004', 3, 1, '2019-10-01', 160);
+INSERT INTO practitioners VALUES (5, 'Sofia', 'Rossi', 'Physical Therapy', '1003001005', 4, 2, '2017-02-14', 85);
+INSERT INTO practitioners VALUES (6, 'David', 'Kim', 'Physical Therapy', '1003001006', 4, 5, '2020-06-01', 80);
+INSERT INTO practitioners VALUES (7, 'Aisha', 'Bello', 'Psychiatry', '1003001007', 5, 1, '2021-04-10', 150);
+INSERT INTO practitioners VALUES (8, 'Tom', 'Walsh', 'Radiology', '1003001008', 2, 3, '2014-11-03', 175);
+INSERT INTO practitioners VALUES (9, 'Nina', 'Patel', 'Family Medicine', '1003001009', 1, 2, '2022-01-17', 105);
+INSERT INTO practitioners VALUES (10, 'Omar', 'Haddad', 'Emergency Medicine', '1003001010', 3, 4, '2023-03-06', 150);
+INSERT INTO practitioners VALUES (11, 'Grace', 'Liu', 'Psychiatry', '1003001011', 5, 7, '2024-07-22', 140);
+INSERT INTO practitioners VALUES (12, 'Leo', 'Martins', 'Family Medicine', NULL, 6, 2, '2026-08-18', 100);
+INSERT INTO patients VALUES (1, 'Maria', 'Garcia', '1951-12-18', 'F', NULL, 'maria.garcia@mail.com', NULL, 3);
+INSERT INTO patients VALUES (2, 'John', 'Smith', '1958-03-18', 'M', 'Dallas', 'john.smith@mail.com', NULL, 1);
+INSERT INTO patients VALUES (3, 'Aiden', 'Johnson', '1970-12-11', 'M', 'Dallas', 'aiden.johnson@mail.com', 'Penicillin', 4);
+INSERT INTO patients VALUES (4, 'Chloe', 'Brown', '1967-12-27', 'F', 'Round Rock', 'chloe.brown@mail.com', 'Shellfish', 2);
+INSERT INTO patients VALUES (5, 'Lucas', 'Lee', '1976-03-16', 'M', NULL, 'lucas.lee@mail.com', 'Penicillin, Latex', NULL);
+INSERT INTO patients VALUES (6, 'Emma', 'Wilson', '2005-01-14', 'F', 'Dallas', 'emma.wilson@mail.com', NULL, 3);
+INSERT INTO patients VALUES (7, 'Noah', 'Taylor', '1957-02-11', 'M', 'Dallas', 'noah.taylor@mail.com', NULL, 2);
+INSERT INTO patients VALUES (8, 'Olivia', 'Nguyen', '1953-12-19', 'F', NULL, 'olivia.nguyen@mail.com', NULL, 5);
+INSERT INTO patients VALUES (9, 'Liam', 'Martin', '1954-02-04', 'M', 'Dallas', 'liam.martin@mail.com', NULL, 1);
+INSERT INTO patients VALUES (10, 'Ava', 'Clark', '1959-03-10', 'F', 'Houston', 'ava.clark@mail.com', NULL, NULL);
+INSERT INTO patients VALUES (11, 'Ethan', 'Lewis', '1962-08-27', 'M', 'Dallas', 'ethan.lewis@mail.com', 'Peanuts', 7);
+INSERT INTO patients VALUES (12, 'Mia', 'Walker', '1955-11-22', 'F', 'Houston', NULL, NULL, 2);
+INSERT INTO patients VALUES (13, 'Mason', 'Hall', '2000-04-04', 'M', 'Austin', NULL, NULL, 3);
+INSERT INTO patients VALUES (14, 'Zoe', 'Young', '1983-01-26', 'F', 'Austin', 'zoe.young@mail.com', NULL, 1);
+INSERT INTO patients VALUES (15, 'Logan', 'King', '1977-07-05', 'M', NULL, 'logan.king@mail.com', NULL, 1);
+INSERT INTO patients VALUES (16, 'Lily', 'Wright', '1971-08-20', 'F', 'Dallas', 'lily.wright@mail.com', 'Aspirin', 7);
+INSERT INTO patients VALUES (17, 'Jacob', 'Lopez', '2006-10-11', 'M', 'Austin', 'jacob.lopez@mail.com', NULL, 7);
+INSERT INTO patients VALUES (18, 'Ella', 'Hill', '1953-09-07', 'F', 'Dallas', 'ella.hill@mail.com', 'Shellfish', 2);
+INSERT INTO patients VALUES (19, 'Henry', 'Scott', '1991-05-12', 'M', 'Round Rock', NULL, NULL, 6);
+INSERT INTO patients VALUES (20, 'Grace', 'Green', '2008-12-06', 'F', 'Dallas', 'grace.green@mail.com', NULL, 2);
+INSERT INTO patients VALUES (21, 'Samuel', 'Adams', '1967-12-20', 'M', NULL, 'samuel.adams@mail.com', 'Penicillin', 1);
+INSERT INTO patients VALUES (22, 'Harper', 'Baker', '1956-09-28', 'F', NULL, NULL, 'Sulfa', NULL);
+INSERT INTO patients VALUES (23, 'Daniel', 'Nelson', '1952-06-09', 'M', 'Houston', 'daniel.nelson@mail.com', NULL, 7);
+INSERT INTO patients VALUES (24, 'Aria', 'Carter', '1949-11-15', 'F', 'Plano', NULL, NULL, 7);
+INSERT INTO patients VALUES (25, 'Maria', 'Garcia', '1951-12-18', 'F', 'Austin', NULL, NULL, 3);
+INSERT INTO invoices VALUES (1, 24, 7, 1, '2025-04-14', '2025-05-14', 'Paid', 165);
+INSERT INTO invoices VALUES (2, 21, 1, 2, '2025-02-06', '2025-03-08', 'Paid', 95);
+INSERT INTO invoices VALUES (3, 7, 2, 2, '2026-06-10', '2026-07-10', 'Overdue', 60);
+INSERT INTO invoices VALUES (4, 24, 7, 4, '2025-08-22', '2025-09-21', 'Paid', 380);
+INSERT INTO invoices VALUES (5, 20, 2, 1, '2026-08-28', '2026-09-27', 'Open', 135);
+INSERT INTO invoices VALUES (6, 23, 7, 4, '2025-04-20', '2025-05-20', 'Partially Paid', 380);
+INSERT INTO invoices VALUES (7, 7, 2, 3, '2026-06-21', '2026-07-21', 'Paid', 190);
+INSERT INTO invoices VALUES (8, 16, 7, 5, '2026-06-13', '2026-07-13', 'Paid', 305);
+INSERT INTO invoices VALUES (9, 6, 3, 1, '2026-06-16', '2026-07-16', 'Overdue', 150);
+INSERT INTO invoices VALUES (10, 14, 1, 1, '2026-08-28', '2026-09-27', 'Open', 165);
+INSERT INTO invoices VALUES (11, 13, 3, 1, '2026-03-09', '2026-04-08', 'Overdue', 15);
+INSERT INTO invoices VALUES (12, 5, NULL, 1, '2026-06-25', '2026-07-25', 'Partially Paid', 165);
+INSERT INTO invoices VALUES (13, 21, 1, 3, '2026-06-27', '2026-07-27', 'Partially Paid', 685);
+INSERT INTO invoices VALUES (14, 3, 4, 3, '2025-05-23', '2025-06-22', 'Paid', 95);
+INSERT INTO invoices VALUES (15, 25, 3, 2, '2026-06-22', '2026-07-22', 'Overdue', 170);
+INSERT INTO invoices VALUES (16, 13, 3, 5, '2025-12-31', '2026-01-30', 'Paid', 435);
+INSERT INTO invoices VALUES (17, 3, 4, 5, '2025-08-23', '2025-09-22', 'Overdue', 110);
+INSERT INTO invoices VALUES (18, 6, 3, 4, '2025-04-10', '2025-05-10', 'Partially Paid', 310);
+INSERT INTO invoices VALUES (19, 12, 2, 2, '2025-03-25', '2025-04-24', 'Paid', 555);
+INSERT INTO invoices VALUES (20, 18, 2, 3, '2025-02-04', '2025-03-06', 'Paid', 590);
+INSERT INTO invoices VALUES (21, 4, 2, 5, '2025-07-18', '2025-08-17', 'Paid', 110);
+INSERT INTO invoices VALUES (22, 25, 3, 4, '2026-06-13', '2026-07-13', 'Partially Paid', 405);
+INSERT INTO invoices VALUES (23, 14, 1, 2, '2025-02-09', '2025-03-11', 'Paid', 40);
+INSERT INTO invoices VALUES (24, 12, 2, 2, '2025-06-14', '2025-07-14', 'Overdue', 175);
+INSERT INTO invoices VALUES (25, 10, NULL, 3, '2025-10-24', '2025-11-23', 'Overdue', 595);
+INSERT INTO invoices VALUES (26, 16, 7, 1, '2025-11-26', '2025-12-26', 'Overdue', 165);
+INSERT INTO invoices VALUES (27, 7, 2, 4, '2026-08-28', '2026-09-27', 'Open', 630);
+INSERT INTO invoices VALUES (28, 24, 7, 4, '2026-03-05', '2026-04-04', 'Paid', 350);
+INSERT INTO invoices VALUES (29, 11, 7, 3, '2025-03-13', '2025-04-12', 'Paid', 120);
+INSERT INTO invoices VALUES (30, 20, 2, 2, '2026-06-29', '2026-07-29', 'Paid', 210);
+INSERT INTO invoices VALUES (31, 7, 2, 1, '2026-07-20', '2026-08-19', 'Overdue', 100);
+INSERT INTO invoices VALUES (32, 2, 1, 5, '2025-08-24', '2025-09-23', 'Overdue', 110);
+INSERT INTO invoices VALUES (33, 4, 2, 2, '2026-01-09', '2026-02-08', 'Paid', 120);
+INSERT INTO invoices VALUES (34, 12, 2, 4, '2025-09-28', '2025-10-28', 'Overdue', 150);
+INSERT INTO invoices VALUES (35, 7, 2, 4, '2025-12-13', '2026-01-12', 'Paid', 100);
+INSERT INTO invoices VALUES (36, 23, 7, 4, '2025-12-17', '2026-01-16', 'Partially Paid', 480);
+INSERT INTO invoices VALUES (37, 14, 1, 4, '2026-05-02', '2026-06-01', 'Void', 0);
+INSERT INTO invoices VALUES (38, 1, 3, 4, '2026-05-30', '2026-06-29', 'Overdue', 100);
+INSERT INTO invoices VALUES (39, 15, 1, 4, '2025-09-17', '2025-10-17', 'Paid', 150);
+INSERT INTO invoices VALUES (40, 18, 2, 3, '2025-11-03', '2025-12-03', 'Paid', 615);
+INSERT INTO invoices VALUES (41, 18, 2, 4, '2025-10-23', '2025-11-22', 'Paid', 350);
+INSERT INTO invoices VALUES (42, 16, 7, 4, '2026-01-23', '2026-02-22', 'Overdue', 200);
+INSERT INTO invoices VALUES (43, 3, 4, 1, '2025-03-21', '2025-04-20', 'Paid', 165);
+INSERT INTO invoices VALUES (44, 24, 7, 4, '2025-07-29', '2025-08-28', 'Paid', 415);
+INSERT INTO invoices VALUES (45, 12, 2, 2, '2025-03-10', '2025-04-09', 'Paid', 110);
+INSERT INTO invoices VALUES (46, 3, 4, 1, '2026-08-28', '2026-09-27', 'Open', 135);
+INSERT INTO invoices VALUES (47, 4, 2, 2, '2026-08-28', '2026-09-27', 'Open', 95);
+INSERT INTO invoices VALUES (48, 3, 4, 2, '2025-07-30', '2025-08-29', 'Paid', 220);
+INSERT INTO charges VALUES (1, 1, 9, '2025-04-11', '99214', 'Office visit, moderate complexity', 1, 165, 165);
+INSERT INTO charges VALUES (2, 2, 8, '2025-02-05', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO charges VALUES (3, 3, 3, '2026-06-07', '93000', 'Electrocardiogram (ECG)', 1, 60, 60);
+INSERT INTO charges VALUES (4, 4, 5, '2025-08-21', '97140', 'Manual therapy (15 min)', 1, 50, 50);
+INSERT INTO charges VALUES (5, 4, 5, '2025-08-19', '97140', 'Manual therapy (15 min)', 2, 50, 100);
+INSERT INTO charges VALUES (6, 4, 5, '2025-08-22', '97161', 'PT evaluation, low complexity', 1, 130, 130);
+INSERT INTO charges VALUES (7, 4, 5, '2025-08-21', '97140', 'Manual therapy (15 min)', 2, 50, 100);
+INSERT INTO charges VALUES (8, 5, 9, '2026-08-26', '85025', 'Complete blood count', 1, 25, 25);
+INSERT INTO charges VALUES (9, 5, 9, '2026-08-25', '99213', 'Office visit, established patient', 1, 110, 110);
+INSERT INTO charges VALUES (10, 6, 5, '2025-04-18', '97140', 'Manual therapy (15 min)', 4, 50, 200);
+INSERT INTO charges VALUES (11, 6, 6, '2025-04-17', '97110', 'Therapeutic exercise (15 min)', 4, 45, 180);
+INSERT INTO charges VALUES (12, 7, 4, '2026-06-21', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO charges VALUES (13, 7, 10, '2026-06-20', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO charges VALUES (14, 8, 11, '2026-06-11', '90834', 'Psychotherapy, 45 minutes', 1, 130, 130);
+INSERT INTO charges VALUES (15, 8, 7, '2026-06-10', '90837', 'Psychotherapy, 60 minutes', 1, 175, 175);
+INSERT INTO charges VALUES (16, 9, 9, '2026-06-14', '99203', 'New patient visit', 1, 150, 150);
+INSERT INTO charges VALUES (17, 10, 9, '2026-08-25', '99203', 'New patient visit', 1, 150, 150);
+INSERT INTO charges VALUES (18, 10, 2, '2026-08-25', '36415', 'Venipuncture (blood draw)', 1, 15, 15);
+INSERT INTO charges VALUES (19, 11, 9, '2026-03-09', '36415', 'Venipuncture (blood draw)', 1, 15, 15);
+INSERT INTO charges VALUES (20, 12, 9, '2026-06-22', '99203', 'New patient visit', 1, 150, 150);
+INSERT INTO charges VALUES (21, 12, 9, '2026-06-23', '36415', 'Venipuncture (blood draw)', 1, 15, 15);
+INSERT INTO charges VALUES (22, 13, 10, '2026-06-26', '99283', 'Emergency visit, moderate severity', 1, 380, 380);
+INSERT INTO charges VALUES (23, 13, 4, '2026-06-25', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO charges VALUES (24, 13, 4, '2026-06-25', '12001', 'Simple wound repair', 1, 210, 210);
+INSERT INTO charges VALUES (25, 14, 10, '2025-05-23', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO charges VALUES (26, 15, 1, '2026-06-20', '36415', 'Venipuncture (blood draw)', 1, 15, 15);
+INSERT INTO charges VALUES (27, 15, 8, '2026-06-20', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO charges VALUES (28, 15, 8, '2026-06-19', '93000', 'Electrocardiogram (ECG)', 1, 60, 60);
+INSERT INTO charges VALUES (29, 16, 7, '2025-12-30', '90837', 'Psychotherapy, 60 minutes', 1, 175, 175);
+INSERT INTO charges VALUES (30, 16, 11, '2025-12-30', '90834', 'Psychotherapy, 45 minutes', 1, 130, 130);
+INSERT INTO charges VALUES (31, 16, 11, '2025-12-30', '90834', 'Psychotherapy, 45 minutes', 1, 130, 130);
+INSERT INTO charges VALUES (32, 17, 11, '2025-08-21', '99213', 'Office visit, established patient', 1, 110, 110);
+INSERT INTO charges VALUES (33, 18, 5, '2025-04-08', '97110', 'Therapeutic exercise (15 min)', 4, 45, 180);
+INSERT INTO charges VALUES (34, 18, 6, '2025-04-10', '97161', 'PT evaluation, low complexity', 1, 130, 130);
+INSERT INTO charges VALUES (35, 19, 1, '2025-03-24', '80053', 'Comprehensive metabolic panel', 1, 40, 40);
+INSERT INTO charges VALUES (36, 19, 1, '2025-03-24', '99223', 'Initial hospital care, high complexity', 1, 420, 420);
+INSERT INTO charges VALUES (37, 19, 1, '2025-03-23', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO charges VALUES (38, 20, 4, '2025-02-01', '99283', 'Emergency visit, moderate severity', 1, 380, 380);
+INSERT INTO charges VALUES (39, 20, 4, '2025-02-03', '12001', 'Simple wound repair', 1, 210, 210);
+INSERT INTO charges VALUES (40, 21, 11, '2025-07-15', '99213', 'Office visit, established patient', 1, 110, 110);
+INSERT INTO charges VALUES (41, 22, 5, '2026-06-13', '97161', 'PT evaluation, low complexity', 1, 130, 130);
+INSERT INTO charges VALUES (42, 22, 5, '2026-06-13', '97110', 'Therapeutic exercise (15 min)', 2, 45, 90);
+INSERT INTO charges VALUES (43, 22, 5, '2026-06-13', '97140', 'Manual therapy (15 min)', 1, 50, 50);
+INSERT INTO charges VALUES (44, 22, 6, '2026-06-10', '97110', 'Therapeutic exercise (15 min)', 3, 45, 135);
+INSERT INTO charges VALUES (45, 23, 3, '2025-02-08', '80053', 'Comprehensive metabolic panel', 1, 40, 40);
+INSERT INTO charges VALUES (46, 24, 3, '2025-06-13', '93000', 'Electrocardiogram (ECG)', 1, 60, 60);
+INSERT INTO charges VALUES (47, 24, 3, '2025-06-14', '80053', 'Comprehensive metabolic panel', 1, 40, 40);
+INSERT INTO charges VALUES (48, 24, 3, '2025-06-12', '93000', 'Electrocardiogram (ECG)', 1, 60, 60);
+INSERT INTO charges VALUES (49, 24, 1, '2025-06-12', '36415', 'Venipuncture (blood draw)', 1, 15, 15);
+INSERT INTO charges VALUES (50, 25, 10, '2025-10-21', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO charges VALUES (51, 25, 4, '2025-10-21', '99283', 'Emergency visit, moderate severity', 1, 380, 380);
+INSERT INTO charges VALUES (52, 25, 4, '2025-10-21', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO charges VALUES (53, 25, 4, '2025-10-23', '85025', 'Complete blood count', 1, 25, 25);
+INSERT INTO charges VALUES (54, 26, 2, '2025-11-26', '99214', 'Office visit, moderate complexity', 1, 165, 165);
+INSERT INTO charges VALUES (55, 27, 6, '2026-08-28', '97140', 'Manual therapy (15 min)', 3, 50, 150);
+INSERT INTO charges VALUES (56, 27, 6, '2026-08-28', '97161', 'PT evaluation, low complexity', 1, 130, 130);
+INSERT INTO charges VALUES (57, 27, 5, '2026-08-27', '97140', 'Manual therapy (15 min)', 3, 50, 150);
+INSERT INTO charges VALUES (58, 27, 5, '2026-08-26', '97140', 'Manual therapy (15 min)', 4, 50, 200);
+INSERT INTO charges VALUES (59, 28, 6, '2026-03-02', '97161', 'PT evaluation, low complexity', 1, 130, 130);
+INSERT INTO charges VALUES (60, 28, 6, '2026-03-02', '97161', 'PT evaluation, low complexity', 1, 130, 130);
+INSERT INTO charges VALUES (61, 28, 6, '2026-03-04', '97110', 'Therapeutic exercise (15 min)', 2, 45, 90);
+INSERT INTO charges VALUES (62, 29, 4, '2025-03-13', '85025', 'Complete blood count', 1, 25, 25);
+INSERT INTO charges VALUES (63, 29, 4, '2025-03-10', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO charges VALUES (64, 30, 3, '2026-06-28', '93000', 'Electrocardiogram (ECG)', 1, 60, 60);
+INSERT INTO charges VALUES (65, 30, 3, '2026-06-27', '36415', 'Venipuncture (blood draw)', 1, 15, 15);
+INSERT INTO charges VALUES (66, 30, 8, '2026-06-27', '80053', 'Comprehensive metabolic panel', 1, 40, 40);
+INSERT INTO charges VALUES (67, 30, 8, '2026-06-28', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO charges VALUES (68, 31, 9, '2026-07-20', '85025', 'Complete blood count', 1, 25, 25);
+INSERT INTO charges VALUES (69, 31, 2, '2026-07-19', '85025', 'Complete blood count', 1, 25, 25);
+INSERT INTO charges VALUES (70, 31, 9, '2026-07-17', '85025', 'Complete blood count', 1, 25, 25);
+INSERT INTO charges VALUES (71, 31, 2, '2026-07-17', '85025', 'Complete blood count', 1, 25, 25);
+INSERT INTO charges VALUES (72, 32, 7, '2025-08-22', '99213', 'Office visit, established patient', 1, 110, 110);
+INSERT INTO charges VALUES (73, 33, 3, '2026-01-08', '93000', 'Electrocardiogram (ECG)', 1, 60, 60);
+INSERT INTO charges VALUES (74, 33, 1, '2026-01-08', '93000', 'Electrocardiogram (ECG)', 1, 60, 60);
+INSERT INTO charges VALUES (75, 34, 6, '2025-09-27', '97140', 'Manual therapy (15 min)', 3, 50, 150);
+INSERT INTO charges VALUES (76, 35, 5, '2025-12-12', '97140', 'Manual therapy (15 min)', 2, 50, 100);
+INSERT INTO charges VALUES (77, 36, 6, '2025-12-14', '97161', 'PT evaluation, low complexity', 1, 130, 130);
+INSERT INTO charges VALUES (78, 36, 6, '2025-12-16', '97161', 'PT evaluation, low complexity', 1, 130, 130);
+INSERT INTO charges VALUES (79, 36, 6, '2025-12-17', '97161', 'PT evaluation, low complexity', 1, 130, 130);
+INSERT INTO charges VALUES (80, 36, 6, '2025-12-17', '97110', 'Therapeutic exercise (15 min)', 2, 45, 90);
+INSERT INTO charges VALUES (81, 38, 5, '2026-05-27', '97140', 'Manual therapy (15 min)', 2, 50, 100);
+INSERT INTO charges VALUES (82, 39, 6, '2025-09-17', '97140', 'Manual therapy (15 min)', 3, 50, 150);
+INSERT INTO charges VALUES (83, 40, 4, '2025-11-03', '99283', 'Emergency visit, moderate severity', 1, 380, 380);
+INSERT INTO charges VALUES (84, 40, 4, '2025-11-02', '85025', 'Complete blood count', 1, 25, 25);
+INSERT INTO charges VALUES (85, 40, 4, '2025-11-01', '12001', 'Simple wound repair', 1, 210, 210);
+INSERT INTO charges VALUES (86, 41, 6, '2025-10-23', '97110', 'Therapeutic exercise (15 min)', 2, 45, 90);
+INSERT INTO charges VALUES (87, 41, 5, '2025-10-21', '97161', 'PT evaluation, low complexity', 1, 130, 130);
+INSERT INTO charges VALUES (88, 41, 5, '2025-10-22', '97161', 'PT evaluation, low complexity', 1, 130, 130);
+INSERT INTO charges VALUES (89, 42, 5, '2026-01-20', '97140', 'Manual therapy (15 min)', 2, 50, 100);
+INSERT INTO charges VALUES (90, 42, 6, '2026-01-20', '97140', 'Manual therapy (15 min)', 2, 50, 100);
+INSERT INTO charges VALUES (91, 43, 2, '2025-03-21', '99214', 'Office visit, moderate complexity', 1, 165, 165);
+INSERT INTO charges VALUES (92, 44, 6, '2025-07-26', '97110', 'Therapeutic exercise (15 min)', 1, 45, 45);
+INSERT INTO charges VALUES (93, 44, 6, '2025-07-28', '97140', 'Manual therapy (15 min)', 3, 50, 150);
+INSERT INTO charges VALUES (94, 44, 5, '2025-07-28', '97110', 'Therapeutic exercise (15 min)', 2, 45, 90);
+INSERT INTO charges VALUES (95, 44, 6, '2025-07-27', '97161', 'PT evaluation, low complexity', 1, 130, 130);
+INSERT INTO charges VALUES (96, 45, 1, '2025-03-09', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO charges VALUES (97, 45, 3, '2025-03-10', '36415', 'Venipuncture (blood draw)', 1, 15, 15);
+INSERT INTO charges VALUES (98, 46, 2, '2026-08-28', '85025', 'Complete blood count', 1, 25, 25);
+INSERT INTO charges VALUES (99, 46, 2, '2026-08-28', '99213', 'Office visit, established patient', 1, 110, 110);
+INSERT INTO charges VALUES (100, 47, 3, '2026-08-26', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO charges VALUES (101, 48, 3, '2025-07-27', '36415', 'Venipuncture (blood draw)', 1, 15, 15);
+INSERT INTO charges VALUES (102, 48, 1, '2025-07-27', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO charges VALUES (103, 48, 1, '2025-07-30', '36415', 'Venipuncture (blood draw)', 1, 15, 15);
+INSERT INTO charges VALUES (104, 48, 8, '2025-07-30', '71046', 'Chest X-ray, 2 views', 1, 95, 95);
+INSERT INTO payments VALUES (1, 1, NULL, '2025-05-09', 165, 'Cash');
+INSERT INTO payments VALUES (2, 2, 1, '2025-03-01', 76, 'Check');
+INSERT INTO payments VALUES (3, 2, NULL, '2025-03-13', 19, 'Credit Card');
+INSERT INTO payments VALUES (4, 4, NULL, '2025-09-25', 380, 'Cash');
+INSERT INTO payments VALUES (5, 6, NULL, '2025-05-28', 152, 'Credit Card');
+INSERT INTO payments VALUES (6, 7, 2, '2026-07-31', 142.5, 'EFT');
+INSERT INTO payments VALUES (7, 7, NULL, '2026-08-21', 47.5, 'Cash');
+INSERT INTO payments VALUES (8, 8, NULL, '2026-07-19', 305, 'Credit Card');
+INSERT INTO payments VALUES (9, 12, NULL, '2026-07-16', 66, 'Credit Card');
+INSERT INTO payments VALUES (10, 13, 1, '2026-07-22', 548, 'EFT');
+INSERT INTO payments VALUES (11, 14, 4, '2025-07-02', 52.25, 'Check');
+INSERT INTO payments VALUES (12, 14, NULL, '2025-07-16', 42.75, 'Credit Card');
+INSERT INTO payments VALUES (13, 16, 3, '2026-01-11', 282.75, 'EFT');
+INSERT INTO payments VALUES (14, 16, NULL, '2026-01-30', 152.25, 'Credit Card');
+INSERT INTO payments VALUES (15, 18, 3, '2025-05-11', 201.5, 'EFT');
+INSERT INTO payments VALUES (16, 19, 2, '2025-04-26', 416.25, 'Check');
+INSERT INTO payments VALUES (17, 19, NULL, '2025-05-21', 138.75, 'Cash');
+INSERT INTO payments VALUES (18, 20, 2, '2025-03-16', 442.5, 'EFT');
+INSERT INTO payments VALUES (19, 20, NULL, '2025-03-21', 147.5, 'Credit Card');
+INSERT INTO payments VALUES (20, 21, 2, '2025-08-11', 82.5, 'EFT');
+INSERT INTO payments VALUES (21, 21, NULL, '2025-08-21', 27.5, 'Credit Card');
+INSERT INTO payments VALUES (22, 22, 3, '2026-07-07', 263.25, 'EFT');
+INSERT INTO payments VALUES (23, 23, 1, '2025-02-22', 32, 'Check');
+INSERT INTO payments VALUES (24, 23, NULL, '2025-03-17', 8, 'Credit Card');
+INSERT INTO payments VALUES (25, 28, NULL, '2026-03-21', 350, 'Cash');
+INSERT INTO payments VALUES (26, 29, NULL, '2025-03-31', 120, 'Credit Card');
+INSERT INTO payments VALUES (27, 30, 2, '2026-07-15', 157.5, 'Check');
+INSERT INTO payments VALUES (28, 30, NULL, '2026-07-26', 52.5, 'Cash');
+INSERT INTO payments VALUES (29, 33, 2, '2026-02-15', 90, 'EFT');
+INSERT INTO payments VALUES (30, 33, NULL, '2026-02-25', 30, 'Credit Card');
+INSERT INTO payments VALUES (31, 35, 2, '2026-01-13', 75, 'EFT');
+INSERT INTO payments VALUES (32, 35, NULL, '2026-01-19', 25, 'Cash');
+INSERT INTO payments VALUES (33, 36, NULL, '2026-01-13', 192, 'Cash');
+INSERT INTO payments VALUES (34, 39, 1, '2025-09-29', 120, 'Check');
+INSERT INTO payments VALUES (35, 39, NULL, '2025-10-21', 30, 'Cash');
+INSERT INTO payments VALUES (36, 40, 2, '2025-11-28', 461.25, 'EFT');
+INSERT INTO payments VALUES (37, 40, NULL, '2025-12-12', 153.75, 'Credit Card');
+INSERT INTO payments VALUES (38, 41, 2, '2025-11-20', 262.5, 'EFT');
+INSERT INTO payments VALUES (39, 41, NULL, '2025-12-11', 87.5, 'Cash');
+INSERT INTO payments VALUES (40, 43, 4, '2025-04-25', 90.75, 'EFT');
+INSERT INTO payments VALUES (41, 43, NULL, '2025-05-01', 74.25, 'Credit Card');
+INSERT INTO payments VALUES (42, 44, NULL, '2025-08-23', 415, 'Credit Card');
+INSERT INTO payments VALUES (43, 45, 2, '2025-03-28', 82.5, 'Check');
+INSERT INTO payments VALUES (44, 45, NULL, '2025-03-31', 27.5, 'Credit Card');
+INSERT INTO payments VALUES (45, 48, 4, '2025-08-20', 121, 'EFT');
+INSERT INTO payments VALUES (46, 48, NULL, '2025-08-25', 99, 'Cash');
+INSERT INTO payments VALUES (47, 1, NULL, '2025-05-09', 165, 'Cash');
+INSERT INTO transactions VALUES (1, 20, '2025-02-01', 'CHARGE', 380, 38, 'system');
+INSERT INTO transactions VALUES (2, 20, '2025-02-03', 'CHARGE', 210, 39, 'system');
+INSERT INTO transactions VALUES (3, 2, '2025-02-05', 'CHARGE', 95, 2, 'system');
+INSERT INTO transactions VALUES (4, 23, '2025-02-08', 'CHARGE', 40, 45, 'system');
+INSERT INTO transactions VALUES (5, 23, '2025-02-22', 'PAYMENT', -32, 23, 'billing.raj');
+INSERT INTO transactions VALUES (6, 2, '2025-03-01', 'PAYMENT', -76, 2, 'system');
+INSERT INTO transactions VALUES (7, 45, '2025-03-09', 'CHARGE', 95, 96, 'system');
+INSERT INTO transactions VALUES (8, 29, '2025-03-10', 'CHARGE', 95, 63, 'system');
+INSERT INTO transactions VALUES (9, 45, '2025-03-10', 'CHARGE', 15, 97, 'system');
+INSERT INTO transactions VALUES (10, 2, '2025-03-13', 'PAYMENT', -19, 3, 'billing.raj');
+INSERT INTO transactions VALUES (11, 29, '2025-03-13', 'CHARGE', 25, 62, 'system');
+INSERT INTO transactions VALUES (12, 20, '2025-03-16', 'PAYMENT', -442.5, 18, 'billing.raj');
+INSERT INTO transactions VALUES (13, 23, '2025-03-17', 'PAYMENT', -8, 24, 'system');
+INSERT INTO transactions VALUES (14, 20, '2025-03-21', 'PAYMENT', -147.5, 19, 'billing.amy');
+INSERT INTO transactions VALUES (15, 43, '2025-03-21', 'CHARGE', 165, 91, 'system');
+INSERT INTO transactions VALUES (16, 19, '2025-03-23', 'CHARGE', 95, 37, 'system');
+INSERT INTO transactions VALUES (17, 19, '2025-03-24', 'CHARGE', 40, 35, 'system');
+INSERT INTO transactions VALUES (18, 19, '2025-03-24', 'CHARGE', 420, 36, 'system');
+INSERT INTO transactions VALUES (19, 45, '2025-03-28', 'PAYMENT', -82.5, 43, 'system');
+INSERT INTO transactions VALUES (20, 29, '2025-03-31', 'PAYMENT', -120, 26, 'billing.raj');
+INSERT INTO transactions VALUES (21, 45, '2025-03-31', 'PAYMENT', -27.5, 44, 'system');
+INSERT INTO transactions VALUES (22, 18, '2025-04-08', 'CHARGE', 180, 33, 'system');
+INSERT INTO transactions VALUES (23, 18, '2025-04-10', 'CHARGE', 130, 34, 'system');
+INSERT INTO transactions VALUES (24, 1, '2025-04-11', 'CHARGE', 165, 1, 'system');
+INSERT INTO transactions VALUES (25, 6, '2025-04-17', 'CHARGE', 180, 11, 'system');
+INSERT INTO transactions VALUES (26, 6, '2025-04-18', 'CHARGE', 200, 10, 'system');
+INSERT INTO transactions VALUES (27, 43, '2025-04-25', 'PAYMENT', -90.75, 40, 'system');
+INSERT INTO transactions VALUES (28, 19, '2025-04-26', 'PAYMENT', -416.25, 16, 'system');
+INSERT INTO transactions VALUES (29, 43, '2025-05-01', 'PAYMENT', -74.25, 41, 'billing.raj');
+INSERT INTO transactions VALUES (30, 1, '2025-05-09', 'PAYMENT', -165, 1, 'system');
+INSERT INTO transactions VALUES (31, 1, '2025-05-09', 'PAYMENT', -165, 47, 'billing.raj');
+INSERT INTO transactions VALUES (32, 18, '2025-05-11', 'PAYMENT', -201.5, 15, 'billing.raj');
+INSERT INTO transactions VALUES (33, 1, '2025-05-18', 'REFUND', 165, 47, 'billing.amy');
+INSERT INTO transactions VALUES (34, 19, '2025-05-21', 'PAYMENT', -138.75, 17, 'system');
+INSERT INTO transactions VALUES (35, 14, '2025-05-23', 'CHARGE', 95, 25, 'system');
+INSERT INTO transactions VALUES (36, 6, '2025-05-28', 'PAYMENT', -152, 5, 'billing.amy');
+INSERT INTO transactions VALUES (37, 6, '2025-06-09', 'ADJUSTMENT', -38, NULL, 'billing.raj');
+INSERT INTO transactions VALUES (38, 24, '2025-06-12', 'CHARGE', 60, 48, 'system');
+INSERT INTO transactions VALUES (39, 24, '2025-06-12', 'CHARGE', 15, 49, 'system');
+INSERT INTO transactions VALUES (40, 24, '2025-06-13', 'CHARGE', 60, 46, 'system');
+INSERT INTO transactions VALUES (41, 24, '2025-06-14', 'CHARGE', 40, 47, 'system');
+INSERT INTO transactions VALUES (42, 14, '2025-07-02', 'PAYMENT', -52.25, 11, 'system');
+INSERT INTO transactions VALUES (43, 21, '2025-07-15', 'CHARGE', 110, 40, 'system');
+INSERT INTO transactions VALUES (44, 14, '2025-07-16', 'PAYMENT', -42.75, 12, 'billing.raj');
+INSERT INTO transactions VALUES (45, 44, '2025-07-26', 'CHARGE', 45, 92, 'system');
+INSERT INTO transactions VALUES (46, 44, '2025-07-27', 'CHARGE', 130, 95, 'system');
+INSERT INTO transactions VALUES (47, 48, '2025-07-27', 'CHARGE', 15, 101, 'system');
+INSERT INTO transactions VALUES (48, 48, '2025-07-27', 'CHARGE', 95, 102, 'system');
+INSERT INTO transactions VALUES (49, 44, '2025-07-28', 'CHARGE', 150, 93, 'system');
+INSERT INTO transactions VALUES (50, 44, '2025-07-28', 'CHARGE', 90, 94, 'system');
+INSERT INTO transactions VALUES (51, 48, '2025-07-30', 'CHARGE', 15, 103, 'system');
+INSERT INTO transactions VALUES (52, 48, '2025-07-30', 'CHARGE', 95, 104, 'system');
+INSERT INTO transactions VALUES (53, 21, '2025-08-11', 'PAYMENT', -82.5, 20, 'billing.amy');
+INSERT INTO transactions VALUES (54, 4, '2025-08-19', 'CHARGE', 100, 5, 'system');
+INSERT INTO transactions VALUES (55, 48, '2025-08-20', 'PAYMENT', -121, 45, 'billing.amy');
+INSERT INTO transactions VALUES (56, 4, '2025-08-21', 'CHARGE', 50, 4, 'system');
+INSERT INTO transactions VALUES (57, 4, '2025-08-21', 'CHARGE', 100, 7, 'system');
+INSERT INTO transactions VALUES (58, 17, '2025-08-21', 'CHARGE', 110, 32, 'system');
+INSERT INTO transactions VALUES (59, 21, '2025-08-21', 'PAYMENT', -27.5, 21, 'billing.amy');
+INSERT INTO transactions VALUES (60, 4, '2025-08-22', 'CHARGE', 130, 6, 'system');
+INSERT INTO transactions VALUES (61, 32, '2025-08-22', 'CHARGE', 110, 72, 'system');
+INSERT INTO transactions VALUES (62, 44, '2025-08-23', 'PAYMENT', -415, 42, 'billing.amy');
+INSERT INTO transactions VALUES (63, 48, '2025-08-25', 'PAYMENT', -99, 46, 'billing.raj');
+INSERT INTO transactions VALUES (64, 39, '2025-09-17', 'CHARGE', 150, 82, 'system');
+INSERT INTO transactions VALUES (65, 4, '2025-09-25', 'PAYMENT', -380, 4, 'billing.amy');
+INSERT INTO transactions VALUES (66, 34, '2025-09-27', 'CHARGE', 150, 75, 'system');
+INSERT INTO transactions VALUES (67, 39, '2025-09-29', 'PAYMENT', -120, 34, 'billing.amy');
+INSERT INTO transactions VALUES (68, 25, '2025-10-21', 'CHARGE', 95, 50, 'system');
+INSERT INTO transactions VALUES (69, 25, '2025-10-21', 'CHARGE', 380, 51, 'system');
+INSERT INTO transactions VALUES (70, 25, '2025-10-21', 'CHARGE', 95, 52, 'system');
+INSERT INTO transactions VALUES (71, 39, '2025-10-21', 'PAYMENT', -30, 35, 'system');
+INSERT INTO transactions VALUES (72, 41, '2025-10-21', 'CHARGE', 130, 87, 'system');
+INSERT INTO transactions VALUES (73, 41, '2025-10-22', 'CHARGE', 130, 88, 'system');
+INSERT INTO transactions VALUES (74, 25, '2025-10-23', 'CHARGE', 25, 53, 'system');
+INSERT INTO transactions VALUES (75, 41, '2025-10-23', 'CHARGE', 90, 86, 'system');
+INSERT INTO transactions VALUES (76, 40, '2025-11-01', 'CHARGE', 210, 85, 'system');
+INSERT INTO transactions VALUES (77, 40, '2025-11-02', 'CHARGE', 25, 84, 'system');
+INSERT INTO transactions VALUES (78, 40, '2025-11-03', 'CHARGE', 380, 83, 'system');
+INSERT INTO transactions VALUES (79, 24, '2025-11-11', 'WRITE_OFF', -87.5, NULL, 'billing.amy');
+INSERT INTO transactions VALUES (80, 41, '2025-11-20', 'PAYMENT', -262.5, 38, 'billing.raj');
+INSERT INTO transactions VALUES (81, 26, '2025-11-26', 'CHARGE', 165, 54, 'system');
+INSERT INTO transactions VALUES (82, 40, '2025-11-28', 'PAYMENT', -461.25, 36, 'billing.amy');
+INSERT INTO transactions VALUES (83, 41, '2025-12-11', 'PAYMENT', -87.5, 39, 'billing.amy');
+INSERT INTO transactions VALUES (84, 35, '2025-12-12', 'CHARGE', 100, 76, 'system');
+INSERT INTO transactions VALUES (85, 40, '2025-12-12', 'PAYMENT', -153.75, 37, 'billing.raj');
+INSERT INTO transactions VALUES (86, 36, '2025-12-14', 'CHARGE', 130, 77, 'system');
+INSERT INTO transactions VALUES (87, 36, '2025-12-16', 'CHARGE', 130, 78, 'system');
+INSERT INTO transactions VALUES (88, 36, '2025-12-17', 'CHARGE', 130, 79, 'system');
+INSERT INTO transactions VALUES (89, 36, '2025-12-17', 'CHARGE', 90, 80, 'system');
+INSERT INTO transactions VALUES (90, 16, '2025-12-30', 'CHARGE', 175, 29, 'system');
+INSERT INTO transactions VALUES (91, 16, '2025-12-30', 'CHARGE', 130, 30, 'system');
+INSERT INTO transactions VALUES (92, 16, '2025-12-30', 'CHARGE', 130, 31, 'system');
+INSERT INTO transactions VALUES (93, 33, '2026-01-08', 'CHARGE', 60, 73, 'system');
+INSERT INTO transactions VALUES (94, 33, '2026-01-08', 'CHARGE', 60, 74, 'system');
+INSERT INTO transactions VALUES (95, 16, '2026-01-11', 'PAYMENT', -282.75, 13, 'billing.amy');
+INSERT INTO transactions VALUES (96, 35, '2026-01-13', 'PAYMENT', -75, 31, 'billing.raj');
+INSERT INTO transactions VALUES (97, 36, '2026-01-13', 'PAYMENT', -192, 33, 'system');
+INSERT INTO transactions VALUES (98, 35, '2026-01-19', 'PAYMENT', -25, 32, 'billing.amy');
+INSERT INTO transactions VALUES (99, 42, '2026-01-20', 'CHARGE', 100, 89, 'system');
+INSERT INTO transactions VALUES (100, 42, '2026-01-20', 'CHARGE', 100, 90, 'system');
+INSERT INTO transactions VALUES (101, 16, '2026-01-30', 'PAYMENT', -152.25, 14, 'billing.amy');
+INSERT INTO transactions VALUES (102, 33, '2026-02-15', 'PAYMENT', -90, 29, 'system');
+INSERT INTO transactions VALUES (103, 33, '2026-02-25', 'PAYMENT', -30, 30, 'system');
+INSERT INTO transactions VALUES (104, 28, '2026-03-02', 'CHARGE', 130, 59, 'system');
+INSERT INTO transactions VALUES (105, 28, '2026-03-02', 'CHARGE', 130, 60, 'system');
+INSERT INTO transactions VALUES (106, 28, '2026-03-04', 'CHARGE', 90, 61, 'system');
+INSERT INTO transactions VALUES (107, 11, '2026-03-09', 'CHARGE', 15, 19, 'system');
+INSERT INTO transactions VALUES (108, 28, '2026-03-21', 'PAYMENT', -350, 25, 'billing.amy');
+INSERT INTO transactions VALUES (109, 38, '2026-05-27', 'CHARGE', 100, 81, 'system');
+INSERT INTO transactions VALUES (110, 3, '2026-06-07', 'CHARGE', 60, 3, 'system');
+INSERT INTO transactions VALUES (111, 8, '2026-06-10', 'CHARGE', 175, 15, 'system');
+INSERT INTO transactions VALUES (112, 22, '2026-06-10', 'CHARGE', 135, 44, 'system');
+INSERT INTO transactions VALUES (113, 8, '2026-06-11', 'CHARGE', 130, 14, 'system');
+INSERT INTO transactions VALUES (114, 22, '2026-06-13', 'CHARGE', 130, 41, 'system');
+INSERT INTO transactions VALUES (115, 22, '2026-06-13', 'CHARGE', 90, 42, 'system');
+INSERT INTO transactions VALUES (116, 22, '2026-06-13', 'CHARGE', 50, 43, 'system');
+INSERT INTO transactions VALUES (117, 9, '2026-06-14', 'CHARGE', 150, 16, 'system');
+INSERT INTO transactions VALUES (118, 15, '2026-06-19', 'CHARGE', 60, 28, 'system');
+INSERT INTO transactions VALUES (119, 7, '2026-06-20', 'CHARGE', 95, 13, 'system');
+INSERT INTO transactions VALUES (120, 15, '2026-06-20', 'CHARGE', 15, 26, 'system');
+INSERT INTO transactions VALUES (121, 15, '2026-06-20', 'CHARGE', 95, 27, 'system');
+INSERT INTO transactions VALUES (122, 7, '2026-06-21', 'CHARGE', 95, 12, 'system');
+INSERT INTO transactions VALUES (123, 12, '2026-06-22', 'CHARGE', 150, 20, 'system');
+INSERT INTO transactions VALUES (124, 12, '2026-06-23', 'CHARGE', 15, 21, 'system');
+INSERT INTO transactions VALUES (125, 13, '2026-06-25', 'CHARGE', 95, 23, 'system');
+INSERT INTO transactions VALUES (126, 13, '2026-06-25', 'CHARGE', 210, 24, 'system');
+INSERT INTO transactions VALUES (127, 13, '2026-06-26', 'CHARGE', 380, 22, 'system');
+INSERT INTO transactions VALUES (128, 30, '2026-06-27', 'CHARGE', 15, 65, 'system');
+INSERT INTO transactions VALUES (129, 30, '2026-06-27', 'CHARGE', 40, 66, 'system');
+INSERT INTO transactions VALUES (130, 30, '2026-06-28', 'CHARGE', 60, 64, 'system');
+INSERT INTO transactions VALUES (131, 30, '2026-06-28', 'CHARGE', 95, 67, 'system');
+INSERT INTO transactions VALUES (132, 22, '2026-07-07', 'PAYMENT', -263.25, 22, 'billing.amy');
+INSERT INTO transactions VALUES (133, 30, '2026-07-15', 'PAYMENT', -157.5, 27, 'system');
+INSERT INTO transactions VALUES (134, 12, '2026-07-16', 'PAYMENT', -66, 9, 'billing.amy');
+INSERT INTO transactions VALUES (135, 31, '2026-07-17', 'CHARGE', 25, 70, 'system');
+INSERT INTO transactions VALUES (136, 31, '2026-07-17', 'CHARGE', 25, 71, 'system');
+INSERT INTO transactions VALUES (137, 8, '2026-07-19', 'PAYMENT', -305, 8, 'billing.raj');
+INSERT INTO transactions VALUES (138, 31, '2026-07-19', 'CHARGE', 25, 69, 'system');
+INSERT INTO transactions VALUES (139, 31, '2026-07-20', 'CHARGE', 25, 68, 'system');
+INSERT INTO transactions VALUES (140, 13, '2026-07-22', 'PAYMENT', -548, 10, 'billing.amy');
+INSERT INTO transactions VALUES (141, 30, '2026-07-26', 'PAYMENT', -52.5, 28, 'system');
+INSERT INTO transactions VALUES (142, 7, '2026-07-31', 'PAYMENT', -142.5, 6, 'system');
+INSERT INTO transactions VALUES (143, 7, '2026-08-21', 'PAYMENT', -47.5, 7, 'system');
+INSERT INTO transactions VALUES (144, 5, '2026-08-25', 'CHARGE', 110, 9, 'system');
+INSERT INTO transactions VALUES (145, 10, '2026-08-25', 'CHARGE', 150, 17, 'system');
+INSERT INTO transactions VALUES (146, 10, '2026-08-25', 'CHARGE', 15, 18, 'system');
+INSERT INTO transactions VALUES (147, 5, '2026-08-26', 'CHARGE', 25, 8, 'system');
+INSERT INTO transactions VALUES (148, 27, '2026-08-26', 'CHARGE', 200, 58, 'system');
+INSERT INTO transactions VALUES (149, 47, '2026-08-26', 'CHARGE', 95, 100, 'system');
+INSERT INTO transactions VALUES (150, 27, '2026-08-27', 'CHARGE', 150, 57, 'system');
+INSERT INTO transactions VALUES (151, 27, '2026-08-28', 'CHARGE', 150, 55, 'system');
+INSERT INTO transactions VALUES (152, 27, '2026-08-28', 'CHARGE', 130, 56, 'system');
+INSERT INTO transactions VALUES (153, 46, '2026-08-28', 'CHARGE', 25, 98, 'system');
+INSERT INTO transactions VALUES (154, 46, '2026-08-28', 'CHARGE', 110, 99, 'system');

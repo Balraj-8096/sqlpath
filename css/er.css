@@ -1,0 +1,135 @@
+/* Interactive ER diagram (js/er.js). Colors come from the theme tokens in app.css. */
+.erx { display: flex; flex-direction: column; gap: 10px; }
+.erx-toolbar { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; }
+.erx-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.erx-tg { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; cursor: pointer; }
+.erx-tg input { accent-color: var(--accent); margin: 0; }
+.erx-sw { display: inline-block; width: 26px; height: 0; border-top: 2.5px solid var(--accent); vertical-align: middle; flex: 0 0 auto; }
+.erx-sw.k-logical { border-top: 2.5px dotted var(--yellow); }
+.erx-sw.k-rollup { border-top: 2.5px dashed var(--green); }
+.erx-sw.k-nn { border-top: 2.5px dashed var(--purple); }
+.erx-body { position: relative; }
+.erx-canvas { position: relative; background-color: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; height: 520px; touch-action: none; cursor: grab;
+  background-image: radial-gradient(color-mix(in srgb, var(--muted) 22%, transparent) 1px, transparent 1px); background-size: 18px 18px; }
+.erx-canvas.full { height: 680px; }
+.erx-canvas.panning { cursor: grabbing; }
+.erx-svg { width: 100%; height: 100%; display: block; user-select: none; }
+.erx-zoom { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 2px; background: var(--panel2); border: 1px solid var(--border); border-radius: 9px; padding: 3px; }
+.erx-zoom .icon-btn { font-size: 15px; padding: 2px 8px; }
+.erx-hint { position: absolute; left: 10px; bottom: 8px; font-size: 11px; color: var(--muted); background: color-mix(in srgb, var(--panel) 85%, transparent); padding: 2px 8px; border-radius: 6px; pointer-events: none; }
+
+/* tables */
+.erx-node { cursor: pointer; transition: opacity .2s; outline: none; }
+.erx-node.dim { opacity: .28; }
+.erx-box { fill: var(--panel2); stroke: var(--border2); stroke-width: 1.2; filter: drop-shadow(0 3px 6px var(--shadow)); }
+.erx-node:hover .erx-box, .erx-node:focus .erx-box { stroke: var(--accent); }
+.erx-node.on .erx-box { stroke: var(--accent); stroke-width: 1.8; }
+.erx-node.sel .erx-box { stroke: var(--accent); stroke-width: 2.8; }
+.erx-head { fill: color-mix(in srgb, var(--accent) 16%, var(--panel3)); }
+.erx-title { fill: var(--text); font: 700 13px var(--mono); }
+.erx-count { fill: var(--muted); font: 10px var(--mono); }
+.erx-colbg { fill: transparent; }
+.erx-col:hover .erx-colbg { fill: var(--hover); }
+.erx-col.hl .erx-colbg { fill: color-mix(in srgb, var(--accent) 24%, transparent); }
+.erx-cname { fill: var(--text); font: 11.5px var(--mono); }
+.erx-col.pk .erx-cname { fill: var(--yellow); font-weight: 700; }
+.erx-col.fk .erx-cname { fill: var(--blue); font-weight: 600; }
+.erx-ctype { fill: var(--muted); font: 10px var(--mono); }
+.erx-badge { stroke-width: 1; }
+.erx-badge.pk { fill: color-mix(in srgb, var(--yellow) 22%, transparent); stroke: var(--yellow); }
+.erx-badge.fk { fill: color-mix(in srgb, var(--blue) 22%, transparent); stroke: var(--blue); }
+.erx-badge.uq { fill: color-mix(in srgb, var(--green) 18%, transparent); stroke: var(--green); }
+.erx-badge-t { fill: var(--text); font: 700 8.5px var(--mono); }
+
+/* relationship lines */
+.erx-edge { cursor: pointer; transition: opacity .2s; }
+.erx-edge.dim, .erx-pill.dim { opacity: .12; }
+.erx-hit { stroke: transparent; stroke-width: 14; fill: none; }
+.erx-line { fill: none; stroke: var(--accent); stroke-width: 1.7; opacity: .85; }
+.erx-edge.k-logical .erx-line { stroke: var(--yellow); stroke-dasharray: 2 4; stroke-linecap: round; stroke-width: 2; }
+.erx-edge.k-rollup .erx-line { stroke: var(--green); stroke-dasharray: 12 6; }
+.erx-edge.k-nn .erx-line { stroke: var(--purple); stroke-dasharray: 7 5; }
+.erx-edge:hover .erx-line, .erx-edge.on .erx-line, .erx-edge.hot .erx-line { stroke-width: 2.8; opacity: 1; }
+.erx-edge.sel .erx-line { stroke-width: 3.4; }
+.erx-edge.k-fk.on .erx-line { stroke-dasharray: 10 4; }
+.erx-edge.on .erx-line { animation: erxflow 1s linear infinite; }
+@keyframes erxflow { to { stroke-dashoffset: -28; } }
+@media (prefers-reduced-motion: reduce) { .erx-edge.on .erx-line { animation: none; } }
+.erx-sym line, .erx-sym circle { stroke: var(--accent); stroke-width: 1.6; fill: var(--panel2); }
+.erx-edge.k-logical .erx-sym line, .erx-edge.k-logical .erx-sym circle { stroke: var(--yellow); }
+.erx-edge.k-rollup .erx-sym line, .erx-edge.k-rollup .erx-sym circle { stroke: var(--green); }
+.erx-edge.k-nn .erx-sym line, .erx-edge.k-nn .erx-sym circle { stroke: var(--purple); }
+.erx-card { font: 700 10.5px var(--mono); fill: var(--accent); }
+.erx-pill { cursor: pointer; transition: opacity .2s; }
+.erx-pill rect { fill: var(--panel); stroke: var(--accent); stroke-width: 1.3; }
+.erx-pill text { fill: var(--accent); font: 700 10.5px var(--mono); }
+.erx-pill.k-logical rect { stroke: var(--yellow); } .erx-pill.k-logical text { fill: var(--yellow); }
+.erx-pill.k-rollup rect { stroke: var(--green); } .erx-pill.k-rollup text { fill: var(--green); }
+.erx-pill.k-nn rect { stroke: var(--purple); } .erx-pill.k-nn text { fill: var(--purple); }
+.erx-pill:hover rect, .erx-pill.on rect, .erx-pill.hot rect { fill: var(--accent); }
+.erx-pill.k-logical:hover rect, .erx-pill.k-logical.on rect { fill: var(--yellow); }
+.erx-pill.k-rollup:hover rect, .erx-pill.k-rollup.on rect { fill: var(--green); }
+.erx-pill.k-nn:hover rect, .erx-pill.k-nn.on rect { fill: var(--purple); }
+.erx-pill:hover text, .erx-pill.on text, .erx-pill.hot text { fill: var(--on-accent); }
+
+/* details panel */
+.erx-panel { position: absolute; top: 8px; right: 8px; bottom: 8px; width: min(370px, calc(100% - 16px)); background: var(--panel); border: 1px solid var(--border2); border-radius: 12px;
+  padding: 12px 14px; overflow-y: auto; box-shadow: -12px 0 32px var(--shadow); transform: translateX(calc(100% + 20px)); visibility: hidden; transition: transform .25s ease, visibility .25s; z-index: 3; }
+.erx-panel.open { transform: none; visibility: visible; }
+.erx-close { position: sticky; top: 0; float: right; margin: -4px -6px 0 6px; z-index: 1; background: var(--panel); }
+.erx-zoom .icon-btn:first-child { font-weight: 700; }
+.erx-p-hd { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.erx-p-hd h3 { font-size: 15px; }
+.erx-grain { font-size: 12.5px; background: var(--panel2); border-radius: 8px; padding: 6px 10px; margin: 6px 0; }
+.erx-list { display: grid; gap: 4px; margin: 8px 0; }
+.erx-li { display: grid; grid-template-columns: 24px 1fr auto; gap: 8px; align-items: center; text-align: left; background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; cursor: pointer; font-size: 12.5px; }
+.erx-li:hover { border-color: var(--accent); }
+.erx-cols { width: 100%; border-collapse: collapse; font-size: 12px; }
+.erx-cols td { border-bottom: 1px solid var(--row-line); padding: 5px 4px; vertical-align: top; }
+.erx-cols td:first-child { width: 30px; }
+.kb { display: inline-block; font: 700 9.5px var(--mono); padding: 1px 4px; border-radius: 4px; border: 1px solid; margin-right: 3px; }
+.kb.pk { color: var(--yellow); border-color: var(--yellow); background: color-mix(in srgb, var(--yellow) 14%, transparent); }
+.kb.fk { color: var(--blue); border-color: var(--blue); background: color-mix(in srgb, var(--blue) 14%, transparent); }
+.kb.uq { color: var(--green); border-color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
+.erx-rels { display: grid; gap: 4px; }
+.erx-rel { text-align: left; background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 12.5px; }
+.erx-rel:hover { border-color: var(--accent); }
+.erx-rel b { font-family: var(--mono); color: var(--accent); margin-right: 4px; }
+.erx-big { display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--panel2); border-radius: 10px; padding: 10px; margin: 8px 0; font: 700 12.5px var(--mono); flex-wrap: wrap; }
+.erx-bigsym line, .erx-bigsym circle { stroke: var(--accent); stroke-width: 1.8; fill: var(--panel2); }
+.erx-read { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; margin: 5px 0; }
+.erx-read-sym { font: 800 12px var(--mono); color: var(--accent); }
+.erx-read .muted { flex-basis: 100%; }
+.erx-keys { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12.5px; margin: 8px 0; }
+.erx-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.erx-stat { background: var(--panel2); border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; display: flex; flex-direction: column; }
+.erx-stat b { font: 800 16px var(--mono); }
+.erx-stat span { font-size: 11px; color: var(--muted); }
+.erx-sql { margin: 8px 0; }
+.erx-sql-hd { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; }
+.erx-sql-hd b { margin-right: auto; }
+.erx-sql .btn.xs { margin-top: 0; }
+.erx-sql .code-wrap { margin: 6px 0; }
+.erx-sql pre.code { font-size: 11.5px; }
+.erx-tip { font-size: 12.5px; background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent); border-radius: 8px; padding: 7px 10px; margin-top: 8px; }
+.erx-pill-static { font: 700 11px var(--mono); border: 1.3px solid var(--accent); color: var(--accent); border-radius: 12px; padding: 1px 9px; white-space: nowrap; }
+.erx-pill-static.k-logical { border-color: var(--yellow); color: var(--yellow); }
+.erx-pill-static.k-rollup { border-color: var(--green); color: var(--green); }
+.erx-pill-static.k-nn { border-color: var(--purple); color: var(--purple); }
+.erx-chain { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 8px 0; }
+.erx-chain code.via { border: 1px dashed var(--purple); }
+.erx-steps { padding-left: 18px; margin: 6px 0; }
+.erx-steps li { margin-bottom: 4px; }
+.erx-legend { margin-top: 12px; border-top: 1px solid var(--border); padding-top: 4px; display: grid; gap: 4px; }
+.erx-lg { display: flex; align-items: center; gap: 8px; }
+
+@media (max-width: 800px) {
+  .erx-panel { position: static; width: auto; margin-top: 10px; transform: none; display: none; box-shadow: none; }
+  .erx-panel.open { display: block; }
+}
+@media (max-width: 640px) { .erx-canvas, .erx-canvas.full { height: 420px; } .erx-hint { display: none; } }
+
+/* full screen */
+.erx:fullscreen, .erx.pseudo-full { background: var(--bg); padding: 12px; overflow: auto; }
+.erx.pseudo-full { position: fixed; inset: 0; z-index: 200; }
+.erx:fullscreen .erx-canvas, .erx.pseudo-full .erx-canvas { height: calc(100vh - 120px); }
