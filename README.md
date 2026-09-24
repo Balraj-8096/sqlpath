@@ -2,6 +2,8 @@
 
 A visual, hands-on SQL course, playground, visual explainer and interview trainer. Every query runs live in the browser on a real **SQLite** engine (sql.js / WebAssembly), against a **Healthcare Billing** sample database.
 
+**Live:** https://balraj-8096.github.io/sqlpath/
+
 ## Run it
 
 Open `index.html` in a modern browser. No build step or server is needed: the WebAssembly engine is embedded, so it also works from `file://`.
